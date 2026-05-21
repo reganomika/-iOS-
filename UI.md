@@ -250,10 +250,10 @@ NSLayoutConstraint.activate([
 - `contentMode` — свойство `UIView`, определяющее **как контент** (чаще всего у `UIImageView`/`CALayer`) размещается внутри bounds вью при отличии размеров.
 - Наиболее популярные:
   - `.scaleToFill` (по умолчанию у многих) — растягивает до bounds, может искажать.
-  - `.scaleAspectFit` — вписывает, сохраняя пропорции, возможны “поля”.
+  - `.scaleAspectFit` — вписывает, сохраняя пропорции, возможны "поля".
   - `.scaleAspectFill` — заполняет, сохраняя пропорции, возможна обрезка.
   - `.center`, `.top`, `.bottom`, `.left`, `.right` и комбинации.
-- `contentMode` влияет на отрисовку/расположение контента, но не является Auto Layout constraint’ом.
+- `contentMode` влияет на отрисовку/расположение контента, но не является Auto Layout constraint'ом и **не влияет на intrinsic content size**.
 
 **Развёрнуто**
 ## 1) Что именно контролирует contentMode
@@ -272,26 +272,31 @@ NSLayoutConstraint.activate([
 - contentMode определяет **как внутри неё** отрисовать контент.
 То есть можно иметь одинаковый layout, но разный contentMode → разный вид.
 
-## 3) Связь с layout и redraw
+## 3) Intrinsic content size и contentMode
+`contentMode` **не влияет** на intrinsic content size вью.
+У `UIImageView` intrinsic content size всегда равен размеру изображения, независимо от выбранного contentMode — это свойство отвечает исключительно за способ отрисовки контента внутри bounds, но не за "предпочтительный размер" вью.
+
+## 4) Связь с layout и redraw
 Когда bounds меняются (например, из-за Auto Layout), вью может:
 - перерисовать контент по правилам contentMode.
 Для некоторых режимов (не `.redraw`) система не вызывает `draw(_:)` автоматически, а просто меняет способ размещения.
 
 Если `contentMode = .redraw`, то при изменении bounds будет вызван `setNeedsDisplay` → `draw(_:)` (если есть кастомное рисование).
 
-## 4) Практика и типичные ошибки
+## 5) Практика и типичные ошибки
 - Фото/аватар:
   - чаще `.scaleAspectFill` + `clipsToBounds = true` (или `layer.masksToBounds = true`), иначе вылезет за bounds.
 - Иконки, которые не должны искажаться:
   - `.scaleAspectFit`.
-- Искажения из-за `.scaleToFill` по умолчанию — частая причина “кривых” картинок.
+- Искажения из-за `.scaleToFill` по умолчанию — частая причина "кривых" картинок.
 
-## 5) Важная связь с masksToBounds
+## 6) Важная связь с masksToBounds
 Если используешь `.scaleAspectFill`, часто нужна обрезка:
 - `clipsToBounds = true`, иначе изображение может рисоваться за пределами видимой области.
 
 **Самопроверка**
-- Оспорено: “contentMode меняет размер вью” — нет, он меняет только способ рисования контента внутри bounds.
+- Оспорено: "contentMode меняет размер вью" — нет, он меняет только способ рисования контента внутри bounds.
+- Оспорено: "contentMode влияет на intrinsic content size" — нет, intrinsic size у UIImageView всегда равен размеру изображения, независимо от contentMode.
 - Неочевидно: `.redraw` может быть дорогим, потому что провоцирует перерисовку при каждом изменении bounds.
 - Источники: UIKit docs `UIView.ContentMode`, поведение `UIImageView` и layer contents, материалы по performance (redraw/overdraw).
 
@@ -749,7 +754,7 @@ override func draw(_ rect: CGRect) {
   - лишний проход рендера,
   - дополнительную нагрузку на GPU/память/бэндвидс.
 - Частые триггеры:
-  - `cornerRadius` + `masksToBounds` (или `clipsToBounds`) на слое с контентом,
+  - `masksToBounds`/`clipsToBounds` на слое с контентом (особенно в сочетании с `cornerRadius`),
   - тени (`shadow*`) без `shadowPath`,
   - маски (`mask`), `UIVisualEffectView`, группы прозрачности (group opacity), некоторые фильтры/blur.
 
@@ -757,26 +762,32 @@ override func draw(_ rect: CGRect) {
 ## 1) Почему вообще возникает offscreen
 GPU любит простую композицию:
 - взять текстуры слоёв и наложить их друг на друга.
-Но некоторые эффекты требуют “промежуточного результата”:
+Но некоторые эффекты требуют "промежуточного результата":
 - обрезка по радиусу (mask),
 - тень по форме,
 - сложная маска/альфа-композиция.
-Чтобы это посчитать, нужно сначала “нарисовать слой отдельно”, применить эффект, и только потом наложить на экран.
+Чтобы это посчитать, нужно сначала "нарисовать слой отдельно", применить эффект, и только потом наложить на экран.
 
 Это и есть offscreen rendering.
 
-## 2) Как распознать, что он происходит
+## 2) `cornerRadius` и `masksToBounds`: важный нюанс
+`cornerRadius` **сам по себе** не всегда вызывает offscreen rendering.
+Начиная с iOS 13+, для простых случаев (однородный фон без subviews) `cornerRadius` без `masksToBounds` не требует offscreen прохода.
+
+Ключевой триггер — именно **клиппинг содержимого** (`masksToBounds = true`/`clipsToBounds = true`) в сочетании с контентом внутри слоя. Если у слоя нет subviews или сложного содержимого — стоимость может быть значительно ниже.
+
+## 3) Как распознать, что он происходит
 ### Признаки
 - лаги при скролле, особенно когда много одинаковых карточек с радиусами/тенями.
 - высокая GPU нагрузка при относительно небольшой нагрузке CPU.
 
 ### Инструменты
 - Instruments → Core Animation:
-  - “Color Offscreen-Rendered” (подсветка offscreen слоёв),
+  - "Color Offscreen-Rendered" (подсветка offscreen слоёв),
   - FPS/Render stats.
 - Xcode → Debug View Hierarchy иногда помогает увидеть подозрительные комбинации.
 
-## 3) Типовые причины и фиксы
+## 4) Типовые причины и фиксы
 ### A) `cornerRadius + masksToBounds`
 Причина:
 - нужно обрезать содержимое по скруглению.
@@ -804,7 +815,7 @@ layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 12).cgPath
 - кэшировать/растрировать (иногда),
 - упрощать иерархию.
 
-## 4) Важное: offscreen не всегда “зло”
+## 5) Важное: offscreen не всегда "зло"
 Если элемент один и не скроллится — может быть нормально.
 Проблема, когда:
 - много элементов (таблица/коллекция),
@@ -812,7 +823,7 @@ layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 12).cgPath
 - эффект меняется часто.
 
 **Самопроверка**
-- Оспорено: “cornerRadius сам по себе всегда вызывает offscreen” — нет, чаще триггер именно `masksToBounds`/clipping + содержимое; но комбинации зависят от того, что именно рендерится.
+- Оспорено: "cornerRadius сам по себе всегда вызывает offscreen" — нет; начиная с iOS 13+, для простых случаев без subviews это не так. Ключевой триггер — `masksToBounds` с содержимым внутри.
 - Неочевидно: тени без `shadowPath` — один из самых частых реальных источников GPU лагов; фикс простой, но про него забывают.
 - Источники: Apple Core Animation performance guide, Instruments Core Animation (offscreen highlight), практики оптимизации списков (rounded corners/shadows).
 
@@ -954,11 +965,12 @@ Prefetching может заранее инициировать загрузку 
 ### Q95 (🟠): Что такое `estimatedRowHeight`?
 
 **Кратко**
-- `estimatedRowHeight` — “предполагаемая” высота строки, которую `UITableView` использует до того, как реально измерит self-sizing ячейки.
+- `estimatedRowHeight` — "предполагаемая" высота строки, которую `UITableView` использует до того, как реально измерит self-sizing ячейки.
 - Нужна, чтобы table view могла:
   - рассчитать `contentSize` заранее,
   - быстро отрисовать первые экраны,
   - избежать тяжелых измерений для всех ячеек сразу.
+- Начиная с iOS 11, если не задать явно, значение по умолчанию — `UITableView.automaticDimension`, и система оценивает высоту автоматически. До iOS 11 дефолт был 0, что отключало estimation полностью.
 - Плохие оценки дают:
   - скачки скролла (jumping),
   - лишние layout passes,
@@ -973,14 +985,18 @@ tableView.rowHeight = UITableView.automaticDimension
 таблица должна вычислять высоту через Auto Layout.
 Но она не может заранее измерить тысячи ячеек — это дорого.
 
-Поэтому она использует “estimate”.
+Поэтому она использует "estimate".
 
 ## 2) Что делает `estimatedRowHeight`
 - До реального измерения table view считает каждую строку примерно равной `estimatedRowHeight`.
 - Это позволяет быстро вычислить примерный `contentSize` и отображать интерфейс без ожидания измерений.
 - По мере того как ячейки появляются/измеряются, таблица уточняет высоты и корректирует layout.
 
-## 3) Как задавать
+## 3) Значение по умолчанию
+- **iOS 11+**: если не задать явно, `estimatedRowHeight = UITableView.automaticDimension` (-1) — система оценивает высоту автоматически на основе первых ячеек.
+- **До iOS 11**: дефолт был `0`, что **отключало** estimation — таблица измеряла все ячейки сразу, что могло быть очень дорого на больших списках.
+
+## 4) Как задавать
 - Можно задать одно значение:
 ```swift
 tableView.estimatedRowHeight = 80
@@ -991,24 +1007,24 @@ func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: Inde
 ```
 (если хочешь разные estimates для разных типов строк).
 
-## 4) Почему от качества оценки зависит плавность
+## 5) Почему от качества оценки зависит плавность
 Если estimate далёк от реальности:
 - таблица сильно ошибётся в `contentSize`,
-- при уточнении высот будет “перескакивать” позиция контента,
+- при уточнении высот будет "перескакивать" позиция контента,
 - появятся дополнительные пересчёты layout на скролле.
 
 Хорошая эвристика:
 - ставь estimate близкий к медианной реальной высоте твоих ячеек.
 - если есть несколько типов ячеек с разными высотами — делай разные estimates.
 
-## 5) Взаимодействие с `estimatedSectionHeaderHeight/estimatedSectionFooterHeight`
+## 6) Взаимодействие с `estimatedSectionHeaderHeight/estimatedSectionFooterHeight`
 Аналогично для header/footer:
 - неверные оценки там тоже дают скачки.
 
-## 6) Типовые проблемы и фиксы
+## 7) Типовые проблемы и фиксы
 - Лаги при первом показе списка:
   - слишком маленький estimate или 0 → таблица начинает измерять много.
-- “jumping content”:
+- "jumping content":
   - estimate сильно отличается.
 - Сложные self-sizing ячейки:
   - оптимизируй constraints (не добавляй/не пересоздавай на лету),
@@ -1016,8 +1032,8 @@ func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: Inde
   - кэшируй высоты, если контент статичен.
 
 **Самопроверка**
-- Оспорено: “estimatedRowHeight — это просто косметика” — нет, это важная оптимизация, влияющая на расчёт contentSize и количество измерений.
-- Неочевидно: лучший эффект даёт не “какой-то” estimate, а близкий к реальности; иначе ты получишь больше работы и прыжки.
+- Оспорено: "estimatedRowHeight — это просто косметика" — нет, это важная оптимизация, влияющая на расчёт contentSize и количество измерений.
+- Неочевидно: до iOS 11 дефолт был 0 и estimation было отключено; на iOS 11+ система оценивает сама, но явное значение близкое к реальности всегда лучше.
 - Источники: Apple docs UITableView self-sizing, статьи/WWDC про performance таблиц, практики подбора estimated heights.
 
 ### Q96 (🟠): Что такое self-sizing cells?
@@ -1685,7 +1701,7 @@ view.transform = CGAffineTransform(rotationAngle: .pi/4)
 ### Q106 (🟠): Как работает трансформация (`CGAffineTransform`)?
 
 **Кратко**
-- `CGAffineTransform` — 2D аффинная матрица (3×3 в гомогенных координатах), которая описывает:
+- `CGAffineTransform` — 2D аффинная матрица (математически 3×3 в гомогенных координатах, но структура хранит только 6 элементов: `a, b, c, d, tx, ty`), которая описывает:
   - перенос (translation),
   - масштаб (scale),
   - поворот (rotation),
@@ -1697,18 +1713,21 @@ view.transform = CGAffineTransform(rotationAngle: .pi/4)
 - Трансформации **композируются** (умножаются), порядок операций важен.
 
 **Развёрнуто**
-## 1) Что значит “аффинная”
+## 1) Что значит "аффинная"
 Она сохраняет прямые линии и параллельность (но не обязательно длины/углы).
 Это покрывает большинство UI-эффектов: rotate/scale/move.
 
-## 2) Как применять в UIKit
+## 2) Структура матрицы
+Математически аффинное преобразование описывается матрицей 3×3 в гомогенных координатах, однако третья строка всегда фиксирована (0, 0, 1) и не хранится. Поэтому `CGAffineTransform` содержит только 6 значений: `a, b, c, d, tx, ty`.
+
+## 3) Как применять в UIKit
 ```swift
 view.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
 view.transform = CGAffineTransform(rotationAngle: .pi/8)
 view.transform = CGAffineTransform(translationX: 20, y: 0)
 ```
 
-## 3) Композиция и порядок
+## 4) Композиция и порядок
 Комбинировать можно через `concatenating` или цепочкой:
 ```swift
 let t = CGAffineTransform.identity
@@ -1720,34 +1739,34 @@ view.transform = t
 
 Порядок важен:
 - rotate потом translate ≠ translate потом rotate.
-Именно это часто “ломает” ожидания.
+Именно это часто "ломает" ожидания.
 
-## 4) Anchor point и layer transforms
+## 5) Anchor point и layer transforms
 `UIView.transform` применяется относительно layer `anchorPoint` (по умолчанию центр).
 Если нужен поворот вокруг угла:
 - можно менять `layer.anchorPoint`, но это сдвигает `position` и требует аккуратной коррекции.
 
-## 5) Влияние на layout
+## 6) Влияние на layout
 - Auto Layout рассчитывает frames **до** применения transform.
 - transform не меняет constraints, это чисто визуальная трансформация.
 Следствие:
-- если ты используешь transform для “изменения размера”, Auto Layout всё равно считает размер прежним.
-- поэтому transform подходит для анимаций, но не для “реального” layout.
+- если ты используешь transform для "изменения размера", Auto Layout всё равно считает размер прежним.
+- поэтому transform подходит для анимаций, но не для "реального" layout.
 
-## 6) Связь с hit-testing
+## 7) Связь с hit-testing
 UIKit преобразует точки между системами координат.
 После transform:
-- координаты “реальной области” вью меняются,
+- координаты "реальной области" вью меняются,
 - hit-testing обычно учитывает transform, но `point(inside:)` работает в локальной системе координат после преобразований.
 
-## 7) Типовые ошибки
-- Считать, что `frame` после transform — “настоящий” layout: это bounding box.
+## 8) Типовые ошибки
+- Считать, что `frame` после transform — "настоящий" layout: это bounding box.
 - Смешивать constraints и transform для одного эффекта и получать неожиданные прыжки.
-- Менять `anchorPoint` без компенсации `position` → вью “прыгает”.
+- Менять `anchorPoint` без компенсации `position` → вью "прыгает".
 
 **Самопроверка**
-- Оспорено: “transform меняет bounds/constraints” — нет, это визуальное преобразование; Auto Layout его не учитывает в расчёте.
-- Неочевидно: порядок операций критичен; многие баги “почему не так крутится/двигается” — это неправильная композиция трансформов.
+- Оспорено: "transform меняет bounds/constraints" — нет, это визуальное преобразование; Auto Layout его не учитывает в расчёте.
+- Неочевидно: порядок операций критичен; многие баги "почему не так крутится/двигается" — это неправильная композиция трансформов.
 - Источники: Core Graphics docs (CGAffineTransform), UIKit transform behavior, Core Animation anchorPoint/position, практики анимаций.
 
 ### Q107 (🟠): Что такое constraints priorities?
@@ -2174,7 +2193,7 @@ let current = view.layer.presentation()?.position
 - В callback нужно делать минимум работы, иначе будут dropped frames.
 
 **Развёрнуто**
-## 1) Почему это не “обычный Timer”
+## 1) Почему это не "обычный Timer"
 `Timer` пытается срабатывать по расписанию, но:
 - не синхронизирован с кадрами,
 - может дрейфовать,
@@ -2192,7 +2211,7 @@ final class Animator {
 
     func startAnimating() {
         let link = CADisplayLink(target: self, selector: #selector(step))
-        link.add(to: .main, forMode: .common) // важно для скролла
+        link.add(to: .main, forMode: .common)
         self.link = link
     }
 
@@ -2210,30 +2229,36 @@ final class Animator {
 ```
 
 ## 3) Важные свойства
-- `timestamp` — время текущего кадра.
-- `duration` — ожидаемая длительность кадра (может быть не точной на ProMotion).
-- `preferredFrameRateRange` (современный API) или `preferredFramesPerSecond` (старый) — настройка частоты.
+- `timestamp` — время текущего кадра (момент, когда начался текущий кадр).
+- `targetTimestamp` — ожидаемое время следующего кадра; именно его лучше использовать для вычисления delta-time, чтобы анимация была максимально точной.
+- `duration` — номинальная длительность кадра при текущей частоте; на устройствах с ProMotion (120Hz) частота динамически меняется, поэтому полагаться только на `duration` ненадёжно.
+- `preferredFrameRateRange` (современный API) или `preferredFramesPerSecond` (устаревший) — настройка желаемой частоты.
 
-На устройствах с ProMotion (120Hz) частота может меняться, поэтому лучше опираться на `timestamp/duration`, а не на “магический 1/60”.
+## 4) Правильный расчёт delta-time
+На ProMotion устройствах частота кадров может меняться динамически, поэтому анимация должна быть time-based, а не frame-based:
+```swift
+@objc private func step(_ link: CADisplayLink) {
+    let dt = link.targetTimestamp - link.timestamp
+    // использовать dt для обновления состояния
+}
+```
 
-## 4) Run loop modes
+## 5) Run loop modes
 Если добавить в `.default`, при скролле (`.tracking`) callback может не приходить.
 Поэтому часто добавляют в `.common`.
 
-## 5) Performance и корректность
+## 6) Performance и корректность
 - В `step` нельзя делать тяжёлые операции.
-- Логику лучше выражать через delta-time:
-  - `dt = link.targetTimestamp - link.timestamp` (или разница timestamp’ов), чтобы анимация была независимой от частоты.
-- Не забывать `invalidate()` иначе утечка (display link удерживает target).
+- Не забывать `invalidate()`, иначе display link удерживает target → утечка.
 
-## 6) Когда не нужен display link
+## 7) Когда не нужен display link
 Если задача — обычная UI-анимация:
 - `UIView.animate` / Core Animation обычно лучше (меньше кода, чаще эффективнее).
 DisplayLink нужен, когда ты сам управляешь состоянием кадр-за-кадром.
 
 **Самопроверка**
-- Оспорено: “display link = точный таймер” — он синхронизирован с vsync, но всё равно зависит от загрузки main и режима run loop.
-- Неочевидно: ProMotion меняет частоту; код должен быть time-based, а не frame-based.
+- Оспорено: "display link = точный таймер" — он синхронизирован с vsync, но всё равно зависит от загрузки main и режима run loop.
+- Неочевидно: на ProMotion частота динамическая; для корректной анимации используй `targetTimestamp`, а не `duration` как единственный источник временного шага.
 - Источники: Apple docs CADisplayLink, WWDC про rendering/vsync, практики time-based animation loops.
 
 ### Q114 (🔴): Как оптимизировать performance в UI?
