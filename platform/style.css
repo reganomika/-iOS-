@@ -132,3 +132,29 @@ pre code { background: none; padding: 0; color: inherit; }
 .done p { color: var(--muted); }
 .toggle-more { color: var(--accent); background: none; border: none; padding: 8px 0; font-weight: 600; }
 .muted { color: var(--muted); }
+
+/* ---------- deck split buttons ---------- */
+.deck { padding: 0; overflow: hidden; }
+.d-study { flex: 1; min-width: 0; text-align: left; background: transparent; border: none; border-radius: 0; padding: 14px 16px; }
+.d-study:hover { filter: brightness(1.08); }
+.d-test { align-self: stretch; border: none; border-left: 1px solid var(--line); border-radius: 0; background: transparent; font-size: 20px; padding: 0 18px; }
+.d-test:hover { background: var(--card2); }
+.deck .d-chev { padding-right: 16px; }
+
+/* ---------- quiz ---------- */
+.quiz-q { font-size: 19px; }
+.opts { display: grid; gap: 10px; margin-top: 6px; }
+.opt { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px; background: var(--card2); }
+.opt:hover:not(:disabled) { border-color: var(--accent); }
+.opt:disabled { cursor: default; }
+.opt-letter { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--bg2); border: 1px solid var(--line); font-weight: 700; font-size: 13px; }
+.opt-text { flex: 1; }
+.opt-mark { font-weight: 800; font-size: 18px; }
+.opt.ok { border-color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
+.opt.ok .opt-letter, .opt.ok .opt-mark { color: var(--green); border-color: var(--green); }
+.opt.bad { border-color: var(--red); background: color-mix(in srgb, var(--red) 15%, transparent); }
+.opt.bad .opt-letter, .opt.bad .opt-mark { color: var(--red); border-color: var(--red); }
+.opt.dim { opacity: .5; }
+.opt-why { font-size: 13.5px; color: var(--muted); padding: 0 14px 4px 52px; }
+.opt-why.ok { color: color-mix(in srgb, var(--green) 80%, var(--text)); }
+.opt-why.bad { color: color-mix(in srgb, var(--red) 80%, var(--text)); }
