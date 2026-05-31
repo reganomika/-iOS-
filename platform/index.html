@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>🧠 Тренажёр конспекта</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="topbar">
+    <button id="homeBtn" class="ghost" aria-label="На главную">🧠</button>
+    <div id="topTitle">Тренажёр конспекта</div>
+    <div id="topStats"></div>
+  </header>
+
+  <main id="app"><!-- рендерится из app.js --></main>
+
+  <!-- порядок важен: данные → логика -->
+  <script src="cards.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
